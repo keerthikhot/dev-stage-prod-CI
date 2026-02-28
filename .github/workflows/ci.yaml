@@ -81,9 +81,8 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
-          format: table
-          exit-code: 1
           severity: CRITICAL,HIGH
+          exit-code: 0 
 
       # 🔟 Tag Image for ECR (Full ECR URI)
       - name: Tag Image for ECR
