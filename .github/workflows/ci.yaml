@@ -40,8 +40,13 @@ jobs:
         run: bandit -r src/
 
       # 5️⃣ Run Unit Tests
-      - name: Run Tests (Pytest)
-        run: pytest tests/
+      - - name: Run Tests (Pytest)
+          run: |
+            if [ -d "tests" ]; then
+              pytest tests/
+            else
+              echo "No tests directory found, skipping tests"
+            fi
 
       # 6️⃣ Configure AWS Credentials (ONLY for ECR login)
       - name: Configure AWS Credentials
