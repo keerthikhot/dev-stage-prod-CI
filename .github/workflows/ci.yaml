@@ -1,0 +1,74 @@
+name: CI - Scan, Build, Push to ECR & Trigger ArgoCD
+
+on:
+  push:
+    branches: [dev, staging, main]
+
+env:
+  ECR_REPOSITORY: my-app
+  AWS_REGION: ap-south-1   # 🔧 EDIT if different
+  IMAGE_TAG: ${{ github.sha }}
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      # Install Dependencies
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      # SAST Code Scan
+      - name: Security Scan (Bandit)
+        run: bandit -r src/
+
+      # Run Unit Tests
+      - name: Run Tests
+        run: pytest tests/
+
+      # Configure AWS Credentials (ONLY for ECR)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Login to ECR
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS \
+          --password-stdin $ECR_REGISTRY
+
+      # Build Docker Image
+      - name: Build Docker Image
+        run: docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+
+      # Scan Image (Container Security)
+      - name: Scan Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: $ECR_REPOSITORY:$IMAGE_TAG
+          severity: CRITICAL,HIGH
+
+      # Tag & Push to ECR
+      - name: Push Image to ECR
+        run: |
+          docker tag $ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+      # 🔥 Trigger GitOps (VERY IMPORTANT)
+      - name: Update GitOps Repo Image Tag
+        run: |
+          git clone https://${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/dev-stage-prod-CD.git
+          cd gitops-repo/apps/my-app/overlays/${{ github.ref_name }}
+          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" kustomization.yaml
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git commit -am "Update image tag to ${{ github.sha }}"
+          git push
