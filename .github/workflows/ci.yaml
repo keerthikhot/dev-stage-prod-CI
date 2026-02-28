@@ -45,7 +45,7 @@ jobs:
             if [ -d "tests" ]; then
               pytest tests/
             else
-              echo "No tests directory found, skipping tests"
+              echo "No tests directory found, skipping testsss"
             fi
 
       # 6️⃣ Configure AWS Credentials (ONLY for ECR login)
