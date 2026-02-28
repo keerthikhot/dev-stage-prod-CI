@@ -9,7 +9,7 @@ on:
 
 env:
   AWS_REGION: us-east-1                  # ✅ Matches your logs
-  ECR_REPOSITORY: repo-app              # ✅ Your actual ECR repo
+  ECR_REPOSITORY: default/repo-app              # ✅ Your actual ECR repo
   IMAGE_TAG: ${{ github.sha }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
