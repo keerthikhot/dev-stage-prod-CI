@@ -99,7 +99,7 @@ jobs:
       - name: Update GitOps Repo Image Tag
         run: |
           echo "Cloning GitOps repository..."
-          git clone https://${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/gitops-repo.git
+          git clone https://${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/dev-stage-prod-CD.git
           
           cd gitops-repo/apps/myapp/overlays/${{ github.ref_name }}
           
