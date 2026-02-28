@@ -8,8 +8,8 @@ on:
       - main
 
 env:
-  AWS_REGION: us-east-1   # 🔧 CHANGE if your ECR is in another region
-  ECR_REPOSITORY: repo-app   # 🔧 CHANGE if your ECR repo name is different
+  AWS_REGION: us-east-1                  # ✅ Matches your logs
+  ECR_REPOSITORY: repo-app              # ✅ Your actual ECR repo
   IMAGE_TAG: ${{ github.sha }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
@@ -22,13 +22,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # 2️⃣ Setup Python (MANDATORY)
+      # 2️⃣ Setup Python (Fixes bandit/pytest issues)
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # 3️⃣ Install Dependencies & Tools
+      # 3️⃣ Install Dependencies & Security Tools
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
@@ -37,16 +37,16 @@ jobs:
           fi
           pip install bandit pytest
 
-      # 4️⃣ SAST Security Scan (Bandit)
+      # 4️⃣ SAST Code Scan (Bandit)
       - name: Security Scan (Bandit)
         run: |
           if [ -d "src" ]; then
-            bandit -r src/ || true
+            bandit -r src/ || echo "Bandit scan completed with warnings"
           else
             echo "No src directory found, skipping bandit scan"
           fi
 
-      # 5️⃣ Run Unit Tests (NON-BLOCKING - FIXES exit code 5)
+      # 5️⃣ Run Unit Tests (Non-blocking - fixes exit code 5)
       - name: Run Tests (Pytest)
         run: |
           echo "Running pytest..."
@@ -56,7 +56,7 @@ jobs:
             echo "No tests directory found, skipping tests"
           fi
 
-      # 6️⃣ Configure AWS Credentials (ONLY for ECR access)
+      # 6️⃣ Configure AWS Credentials (FOR ECR)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -71,21 +71,21 @@ jobs:
           docker login --username AWS \
           --password-stdin $ECR_REGISTRY
 
-      # 8️⃣ Build Docker Image
+      # 8️⃣ Build Docker Image (Local Tag)
       - name: Build Docker Image
         run: |
           docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
 
-      # 9️⃣ Scan Docker Image (Trivy - Container Security)
+      # 9️⃣ Scan Docker Image with Trivy (FIXED variable expansion)
       - name: Scan Image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: $ECR_REPOSITORY:$IMAGE_TAG
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           format: table
           exit-code: 1
           severity: CRITICAL,HIGH
 
-      # 🔟 Tag Image for ECR
+      # 🔟 Tag Image for ECR (Full ECR URI)
       - name: Tag Image for ECR
         run: |
           docker tag $ECR_REPOSITORY:$IMAGE_TAG \
