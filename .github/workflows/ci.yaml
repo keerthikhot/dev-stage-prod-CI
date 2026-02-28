@@ -8,8 +8,8 @@ on:
       - main
 
 env:
-  AWS_REGION: us-east-1           # 🔧 EDIT if your region is different
-  ECR_REPOSITORY: my-app            # 🔧 EDIT if your repo name is different
+  AWS_REGION: us-east-1   # 🔧 MUST match your ECR region
+  ECR_REPOSITORY: repo-app
   IMAGE_TAG: ${{ github.sha }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
 
@@ -22,33 +22,33 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      # 2️⃣ Setup Python (MANDATORY - fixes many CI issues)
+      # 2️⃣ Setup Python
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # 3️⃣ Install Dependencies + Security Tools
+      # 3️⃣ Install Dependencies + Tools
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install bandit pytest
 
-      # 4️⃣ SAST Code Scan (Bandit)  ← YOUR ERROR FIXED HERE
+      # 4️⃣ SAST Code Scan (Bandit)
       - name: Security Scan (Bandit)
         run: bandit -r src/
 
-      # 5️⃣ Run Unit Tests
-      - - name: Run Tests (Pytest)
-          run: |
-            if [ -d "tests" ]; then
-              pytest tests/
-            else
-              echo "No tests directory found, skipping testsss"
-            fi
+      # 5️⃣ Run Unit Tests (SAFE VERSION - won’t fail if no tests)
+      - name: Run Tests (Pytest)
+        run: |
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            pytest tests/
+          else
+            echo "No tests found, skipping tests"
+          fi
 
-      # 6️⃣ Configure AWS Credentials (ONLY for ECR login)
+      # 6️⃣ Configure AWS Credentials (FOR ECR)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -65,10 +65,9 @@ jobs:
 
       # 8️⃣ Build Docker Image
       - name: Build Docker Image
-        run: |
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+        run: docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
 
-      # 9️⃣ Scan Docker Image (Container Security)
+      # 9️⃣ Scan Docker Image (Trivy)
       - name: Scan Image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -88,7 +87,7 @@ jobs:
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-      # 1️⃣2️⃣ Update GitOps Repo (Triggers ArgoCD Deploy)
+      # 1️⃣2️⃣ Update GitOps Repo (Triggers ArgoCD)
       - name: Update GitOps Repo Image Tag
         run: |
           git clone https://${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/gitops-repo.git
