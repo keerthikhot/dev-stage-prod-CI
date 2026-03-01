@@ -4,8 +4,10 @@ FROM python:3.10-slim
 # Set working directory inside container
 WORKDIR /app
 
-# Keep Python logs unbuffered in container logs.
-ENV PYTHONUNBUFFERED=1
+# Keep Python logs unbuffered and expose runtime host/port via env.
+ENV PYTHONUNBUFFERED=1 \
+    APP_HOST=0.0.0.0 \
+    APP_PORT=5000
 
 # Copy requirements first (for caching)
 COPY requirements.txt .
