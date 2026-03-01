@@ -12,7 +12,6 @@ env:
   ECR_REPOSITORY: default/repo-app
   IMAGE_TAG: ${{ github.sha }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
-  GITOPS_REPO: dev-stage-prod-CD
 
 jobs:
   ci:
@@ -93,8 +92,9 @@ jobs:
       - name: Checkout GitOps repo
         uses: actions/checkout@v4
         with:
-          repository: keerthikhot/${{ env.GITOPS_REPO }}
+          repository: keerthikhot/dev-stage-prod-CD
           token: ${{ secrets.GIT_TOKEN }}
+          ref: main
           path: gitops-repo
 
       - name: Update GitOps repo image tag
@@ -112,4 +112,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "apps/myapp/overlays/${OVERLAY}/kustomization.yaml"
           git commit -m "ci: update ${OVERLAY} image to ${IMAGE_TAG}" || echo "No changes to commit"
-          git push origin main
+          git push origin HEAD:main
