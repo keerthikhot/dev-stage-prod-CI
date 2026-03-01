@@ -1,0 +1,28 @@
+name: CD - Apply ArgoCD Applications
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.0
+
+      - name: Prepare kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBECONFIG_BASE64 }}" | base64 --decode > "$HOME/.kube/config"
+
+      - name: Clone GitOps repo
+        run: |
+          git clone "https://x-access-token:${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/dev-stage-prod-CD.git" gitops-repo
+
+      - name: Apply ArgoCD applications
+        run: kubectl apply -f gitops-repo/argocd

@@ -1,4 +1,4 @@
-name: CI - Scan, Test, Build, Push to ECR & Trigger ArgoCD
+name: CI - Build, Scan, Push and Update GitOps
 
 on:
   push:
@@ -8,107 +8,91 @@ on:
       - main
 
 env:
-  AWS_REGION: us-east-1                  # ✅ Matches your logs
-  ECR_REPOSITORY: default/repo-app              # ✅ Your actual ECR repo
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: default/repo-app
   IMAGE_TAG: ${{ github.sha }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  GITOPS_REPO: dev-stage-prod-CD
 
 jobs:
   ci:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout Source Code
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # 2️⃣ Setup Python (Fixes bandit/pytest issues)
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: "3.10"
 
-      # 3️⃣ Install Dependencies & Security Tools
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+          pip install -r requirements.txt
           pip install bandit pytest
 
-      # 4️⃣ SAST Code Scan (Bandit)
-      - name: Security Scan (Bandit)
-        run: |
-          if [ -d "src" ]; then
-            bandit -r src/ || echo "Bandit scan completed with warnings"
-          else
-            echo "No src directory found, skipping bandit scan"
-          fi
+      - name: Security scan (Bandit)
+        run: bandit -r src/
 
-      # 5️⃣ Run Unit Tests (Non-blocking - fixes exit code 5)
-      - name: Run Tests (Pytest)
-        run: |
-          echo "Running pytest..."
-          if [ -d "tests" ]; then
-            pytest tests/ --maxfail=1 --disable-warnings || echo "No tests collected, continuing pipeline"
-          else
-            echo "No tests directory found, skipping tests"
-          fi
+      - name: Run tests
+        run: pytest tests/ --maxfail=1 --disable-warnings
 
-      # 6️⃣ Configure AWS Credentials (FOR ECR)
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 7️⃣ Login to Amazon ECR
       - name: Login to Amazon ECR
         run: |
-          aws ecr get-login-password --region $AWS_REGION | \
-          docker login --username AWS \
-          --password-stdin $ECR_REGISTRY
+          aws ecr get-login-password --region "$AWS_REGION" | \
+          docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-      # 8️⃣ Build Docker Image (Local Tag)
-      - name: Build Docker Image
+      - name: Build Docker image
         run: |
-          docker build -t $ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
 
-      # 9️⃣ Scan Docker Image with Trivy (FIXED variable expansion)
-      - name: Scan Image with Trivy
-        uses: aquasecurity/trivy-action@master
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: ${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
           severity: CRITICAL,HIGH
-          exit-code: 0 
+          exit-code: "0"
 
-      # 🔟 Tag Image for ECR (Full ECR URI)
-      - name: Tag Image for ECR
-        run: |
-          docker tag $ECR_REPOSITORY:$IMAGE_TAG \
-          $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+      - name: Push image to ECR
+        run: docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
 
-      # 1️⃣1️⃣ Push Image to Amazon ECR
-      - name: Push Image to ECR
+      - name: Resolve target overlay from branch
+        id: overlay
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          case "${GITHUB_REF_NAME}" in
+            dev) echo "name=dev" >> "$GITHUB_OUTPUT" ;;
+            staging) echo "name=stage" >> "$GITHUB_OUTPUT" ;;
+            main) echo "name=prod" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+              ;;
+          esac
 
-      # 1️⃣2️⃣ Update GitOps Repo (Triggers ArgoCD Deployment)
-      - name: Update GitOps Repo Image Tag
+      - name: Update GitOps repo image tag
         run: |
-          echo "Cloning GitOps repository..."
-          git clone https://${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/dev-stage-prod-CI.git
-          
-          cd gitops-repo/apps/myapp/overlays/${{ github.ref_name }}
-          
-          echo "Updating image tag to $IMAGE_TAG"
-          sed -i "s|IMAGE_TAG|${{ github.sha }}|g" kustomization.yaml
-          
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          
-          git add .
-          git commit -m "Update image tag to ${{ github.sha }}" || echo "No changes to commit"
-          git push
+          git clone "https://x-access-token:${{ secrets.GIT_TOKEN }}@github.com/keerthikhot/${GITOPS_REPO}.git" gitops-repo
+
+          OVERLAY="${{ steps.overlay.outputs.name }}"
+          FILE="gitops-repo/apps/myapp/overlays/${OVERLAY}/kustomization.yaml"
+          NEW_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}"
+
+          sed -i.bak -E "s|(^[[:space:]]*newName:[[:space:]]*).*$|\\1${NEW_IMAGE}|" "$FILE"
+          sed -i.bak2 -E "s|(^[[:space:]]*newTag:[[:space:]]*).*$|\\1${IMAGE_TAG}|" "$FILE"
+          rm -f "$FILE.bak" "$FILE.bak2"
+
+          cd gitops-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "apps/myapp/overlays/${OVERLAY}/kustomization.yaml"
+          git commit -m "ci: update ${OVERLAY} image to ${IMAGE_TAG}" || echo "No changes to commit"
+          git push origin main

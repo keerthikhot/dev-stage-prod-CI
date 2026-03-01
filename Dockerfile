@@ -4,6 +4,9 @@ FROM python:3.10-slim
 # Set working directory inside container
 WORKDIR /app
 
+# Keep Python logs unbuffered in container logs.
+ENV PYTHONUNBUFFERED=1
+
 # Copy requirements first (for caching)
 COPY requirements.txt .
 
@@ -17,4 +20,4 @@ COPY . .
 EXPOSE 5000
 
 # Run the application
-CMD ["python", "app.py"]
+CMD ["python", "src/app.py"]
