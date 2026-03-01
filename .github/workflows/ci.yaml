@@ -37,7 +37,7 @@ jobs:
         run: bandit -r src/
 
       - name: Run tests
-        run: pytest tests/ --maxfail=1 --disable-warnings
+        run: PYTHONPATH="$GITHUB_WORKSPACE" pytest tests/ --maxfail=1 --disable-warnings
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
