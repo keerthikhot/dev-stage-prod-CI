@@ -1,4 +1,4 @@
-name: CI - Build, Scan, Push and Update GitOps
+name: CI - Build, Scan, Push and Update CD Repo
 
 on:
   push:
@@ -7,18 +7,22 @@ on:
       - staging
       - main
 
+permissions:
+  contents: read
+
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: default/repo-app
   IMAGE_TAG: ${{ github.sha }}
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  CD_REPO: keerthikhot/dev-stage-prod-CD
 
 jobs:
   ci:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout CI repo
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -61,8 +65,7 @@ jobs:
           docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
       - name: Build Docker image
-        run: |
-          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+        run: docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
 
       - name: Scan image with Trivy
         run: |
@@ -79,25 +82,35 @@ jobs:
       - name: Resolve target overlay from branch
         id: overlay
         run: |
-          case "${GITHUB_REF_NAME}" in
+          case "$GITHUB_REF_NAME" in
             dev) echo "name=dev" >> "$GITHUB_OUTPUT" ;;
             staging) echo "name=stage" >> "$GITHUB_OUTPUT" ;;
             main) echo "name=prod" >> "$GITHUB_OUTPUT" ;;
             *)
-              echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2
+              echo "Unsupported branch: $GITHUB_REF_NAME" >&2
               exit 1
               ;;
           esac
 
-      - name: Checkout GitOps repo
-        uses: actions/checkout@v4
-        with:
-          repository: keerthikhot/dev-stage-prod-CD
-          token: ${{ secrets.GIT_TOKEN }}
-          ref: main
-          path: gitops-repo
+      - name: Validate CD repo token
+        env:
+          CD_REPO_PAT: ${{ secrets.CD_REPO_PAT }}
+        run: |
+          if [ -z "$CD_REPO_PAT" ]; then
+            echo "::error::Missing secret CD_REPO_PAT in dev-stage-prod-CI repo."
+            echo "::error::Create a classic PAT (repo) or fine-grained PAT with Contents read/write on dev-stage-prod-CD."
+            exit 1
+          fi
 
-      - name: Update GitOps repo image tag
+      - name: Clone CD repo
+        env:
+          CD_REPO_PAT: ${{ secrets.CD_REPO_PAT }}
+        run: |
+          git clone "https://x-access-token:${CD_REPO_PAT}@github.com/${CD_REPO}.git" gitops-repo
+          cd gitops-repo
+          git checkout main
+
+      - name: Update image tag in CD repo
         run: |
           OVERLAY="${{ steps.overlay.outputs.name }}"
           FILE="gitops-repo/apps/myapp/overlays/${OVERLAY}/kustomization.yaml"
@@ -107,9 +120,14 @@ jobs:
           sed -i.bak2 -E "s|(^[[:space:]]*newTag:[[:space:]]*).*$|\\1${IMAGE_TAG}|" "$FILE"
           rm -f "$FILE.bak" "$FILE.bak2"
 
+      - name: Commit and push CD repo changes
+        env:
+          CD_REPO_PAT: ${{ secrets.CD_REPO_PAT }}
+        run: |
           cd gitops-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "apps/myapp/overlays/${OVERLAY}/kustomization.yaml"
-          git commit -m "ci: update ${OVERLAY} image to ${IMAGE_TAG}" || echo "No changes to commit"
-          git push origin HEAD:main
+          git add "apps/myapp/overlays/${{ steps.overlay.outputs.name }}/kustomization.yaml"
+          git commit -m "ci: update ${{ steps.overlay.outputs.name }} image to ${IMAGE_TAG}" || echo "No changes to commit"
+          git remote set-url origin "https://x-access-token:${CD_REPO_PAT}@github.com/${CD_REPO}.git"
+          git push origin main
